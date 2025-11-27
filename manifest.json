@@ -1,33 +1,35 @@
 {
   "manifest_version": 3,
   "name": "Ostrov",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Проигрывает остров в океане в нарезках Солека",
   "permissions": [
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://www.youtube.com/*"
   ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    },
+    "default_title": "Настройки Ostrov"
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
       "js": ["content.js"]
     }
   ],
-  "icons": {
-    "16": "icon.png",
-    "48": "icon.png",
-    "128": "icon.png"
-  },
-  "action": {
-    "default_icon": {
-      "16": "icon.png",
-      "48": "icon.png",
-      "128": "icon.png"
-    },
-    "default_title": "Solek Narezki Ostrov Intro Player"
-  },
   "web_accessible_resources": [
     {
       "resources": ["okeane_ane_ane.mp3"],

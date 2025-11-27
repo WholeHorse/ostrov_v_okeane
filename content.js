@@ -1,136 +1,157 @@
-// --- НАСТРОЙКИ ---
+// --- КОНСТАНТЫ ---
 const TARGET_CHANNEL_HANDLE = "@solekxnarezka";
-const AUDIO_DURATION_MS = 8000; // 8 секунд
+const SOUND_FILE = "okeane_ane_ane.mp3";
+const AUDIO_DURATION_MS = 8000; // 8 секунд (лимит)
 
 // --- ПЕРЕМЕННЫЕ СОСТОЯНИЯ ---
 let audioObj = null;
-let stopTimeout = null;
-let currentVideoId = "";
+let lastUrl = location.href;
 
-// Функция для получения полного пути к файлу внутри расширения
-const soundUrl = chrome.runtime.getURL("okeane_ane_ane.mp3");
+// Путь к файлу
+const soundUrl = chrome.runtime.getURL(SOUND_FILE);
 
-// Функция проверки канала
-function isTargetChannel() {
-  // Ищем элемент с ссылкой на канал под видео
-  const channelLink = document.querySelector("#upload-info #channel-name a");
-  
-  if (channelLink) {
-    const href = channelLink.getAttribute("href"); // обычно /@ChannelName
-    const text = channelLink.innerText;
+// --- СЛУШАТЕЛЬ ИЗМЕНЕНИЙ НАСТРОЕК (В РЕАЛЬНОМ ВРЕМЕНИ) ---
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && audioObj) {
+    // Если изменилась громкость — применяем сразу
+    if (changes.volume) {
+      const newVol = changes.volume.newValue;
+      audioObj.volume = newVol / 100;
+      console.log(`Громкость изменена на лету: ${newVol}%`);
+    }
     
-    // Проверяем либо ссылку, либо текст (приводим к нижнему регистру для надежности)
+    // Если выключили плагин во время проигрывания — останавливаем
+    if (changes.isEnabled && changes.isEnabled.newValue === false) {
+      stopAudio();
+    }
+  }
+});
+
+// --- ФУНКЦИИ ---
+
+function isTargetChannel() {
+  const channelLink = document.querySelector("#upload-info #channel-name a");
+  if (channelLink) {
+    const href = channelLink.getAttribute("href");
     if (href && href.toLowerCase().includes(TARGET_CHANNEL_HANDLE.toLowerCase())) {
       return true;
     }
-    // Иногда YouTube показывает просто имя без @ в тексте, но ссылка надежнее
   }
   return false;
 }
 
-// Функция остановки звука
 function stopAudio() {
   if (audioObj) {
     audioObj.pause();
-    audioObj.currentTime = 0; // Сброс в начало
-    audioObj = null;
-  }
-  if (stopTimeout) {
-    clearTimeout(stopTimeout);
-    stopTimeout = null;
+    audioObj.currentTime = 0;
+    // Удаляем объект, чтобы освободить память
+    audioObj = null; 
+    console.log("Audio stopped and cleared.");
   }
 }
 
-// Функция запуска звука
-function playIntro() {
-  // Если уже играет - не запускаем заново
+// Создание и запуск аудио
+function startIntro() {
+  // Если аудио уже есть (например, на паузе) — не создаем новое
   if (audioObj) return;
 
-  audioObj = new Audio(soundUrl);
-  audioObj.volume = 0.5; // Громкость 50%
-  
-  audioObj.play().then(() => {
-    console.log("Intro started!");
-    // Таймер на 8 секунд для остановки
-    stopTimeout = setTimeout(() => {
+  chrome.storage.local.get({ isEnabled: true, volume: 50 }, (settings) => {
+    if (!settings.isEnabled) return;
+
+    audioObj = new Audio(soundUrl);
+    audioObj.volume = settings.volume / 100;
+
+    // ЛОГИКА ОГРАНИЧЕНИЯ ВРЕМЕНИ
+    // Мы следим за временем самого аудио. Это позволяет работать паузе корректно.
+    audioObj.ontimeupdate = () => {
+      // Если проиграли больше 8 секунд
+      if (audioObj.currentTime >= (AUDIO_DURATION_MS / 1000)) {
+        stopAudio();
+      }
+    };
+
+    // Если трек закончился сам
+    audioObj.onended = () => {
       stopAudio();
-      console.log("Intro finished naturally.");
-    }, AUDIO_DURATION_MS);
-  }).catch(e => console.error("Ошибка воспроизведения аудио:", e));
+    };
+
+    audioObj.play().then(() => {
+      console.log("Intro started.");
+    }).catch(e => {
+      console.error("Autoplay blocked or error:", e);
+      stopAudio();
+    });
+  });
 }
 
-// Главная функция настройки видеоплеера
-function setupVideoListener() {
-  // Проверяем, изменилось ли видео (YouTube SPA навигация)
-  const urlParams = new URLSearchParams(window.location.search);
-  const newVideoId = urlParams.get("v");
+// --- ГЛАВНАЯ ЛОГИКА ---
 
-  if (!newVideoId) return; // Мы не на странице видео
+function setupVideoListener() {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (!urlParams.get("v")) return;
 
   const videoElement = document.querySelector("video.html5-main-video");
-  
   if (!videoElement) return;
 
-  // Если это то же самое видео и мы уже настроили слушатели - выходим,
-  // НО нам нужно проверять канал каждый раз, так как элементы подгружаются асинхронно.
-  
-  // Логика:
-  // 1. Ждем, пока прогрузится инфо о канале.
-  // 2. Если канал наш -> вешаем слушатели на видео.
-  
+  // Ждем прогрузки информации о канале
   const checkChannelInterval = setInterval(() => {
-    // Проверяем наличие элемента канала
     if (document.querySelector("#upload-info #channel-name a")) {
       clearInterval(checkChannelInterval);
       
       if (isTargetChannel()) {
-        console.log("Целевой канал обнаружен. Активация интро.");
-        
-        // Удаляем старые слушатели (через клонирование элемента - грязный хак, 
-        // но самый простой способ сбросить слушатели в расширениях, если не сохранять ссылки)
-        // Но лучше просто добавить проверку флагов, чтобы не ломать плеер YouTube.
-        
-        // Добавляем слушатель "play"
+        console.log("Целевой канал. Настройка синхронизации.");
+
+        // 1. СОБЫТИЕ: PLAY (Нажатие плей или автостарт)
         videoElement.addEventListener("play", () => {
-             // Запускаем только если текущее время видео близко к началу (например, < 2 сек)
-             // Если нужно, чтобы играло ВСЕГДА при нажатии play, убери условие currentTime
-             if (videoElement.currentTime < 2) {
-                 playIntro();
-             }
+          // Ситуация А: Мы продолжаем просмотр после паузы, и интро еще не доиграло
+          if (audioObj) {
+             audioObj.play();
+             console.log("Video resumed -> Intro resumed");
+          } 
+          // Ситуация Б: Это начало видео
+          else if (videoElement.currentTime < 2) {
+             startIntro();
+          }
         });
 
-        // Добавляем слушатель "seeking" (перемотка) -> останавливаем звук
+        // 2. СОБЫТИЕ: PAUSE (Нажатие паузы)
+        videoElement.addEventListener("pause", () => {
+          if (audioObj) {
+            audioObj.pause();
+            console.log("Video paused -> Intro paused");
+          }
+        });
+
+        // 3. СОБЫТИЕ: SEEKING (Перемотка)
         videoElement.addEventListener("seeking", () => {
-          console.log("Перемотка обнаружена. Остановка интро.");
+          // При перемотке всегда выключаем интро, чтобы не бесило
           stopAudio();
+          console.log("Seeking detected -> Intro killed");
         });
         
-        // Если видео уже играет при загрузке страницы (autoplay)
+        // 4. ПРОВЕРКА ПРИ ЗАГРУЗКЕ
+        // Если видео уже идет (автоплей сработал быстрее скрипта)
         if (!videoElement.paused && videoElement.currentTime < 2) {
-             playIntro();
+           startIntro();
         }
 
       } else {
-        console.log("Это не тот канал.");
-        stopAudio(); // На всякий случай
+        // Если перешли на другой канал - стоп
+        stopAudio();
       }
     }
-  }, 500); // Проверяем каждые полсекунды, пока не загрузится DOM
+  }, 500);
 }
 
-// --- НАБЛЮДАТЕЛЬ (OBSERVER) ---
-// Так как YouTube не перезагружает страницу, нам нужен Observer, 
-// чтобы следить за изменениями URL или тела страницы.
-
-let lastUrl = location.href; 
+// Наблюдатель за сменой видео (YouTube SPA)
 new MutationObserver(() => {
   const url = location.href;
   if (url !== lastUrl) {
     lastUrl = url;
-    stopAudio(); // Остановить звук от предыдущего видео
-    setupVideoListener(); // Перенастроить на новое видео
+    stopAudio(); // Убираем звук от старого видео
+    setupVideoListener(); // Инициализируем для нового
   }
 }).observe(document, {subtree: true, childList: true});
 
-// Первый запуск при загрузке страницы
+// Первый запуск
 setupVideoListener();
