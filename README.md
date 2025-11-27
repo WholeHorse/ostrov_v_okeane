@@ -6,7 +6,7 @@
 
 Так как плагина нет в официальном магазине Google, установка занимает 1 минуту:
 
-1. **Скачайте архив** с последней версией: [Ссылка на скачивание](https://github.com/WholeHorse/ostrov_v_okeane/releases/download/v1.0/ostrov.zip)
+1. **Скачайте архив** с последней версией: [Ссылка на скачивание](https://github.com/WholeHorse/ostrov_v_okeane/releases/download/v1.1/ostrov.zip)
 2. **Распакуйте** скачанный ZIP-архив в любую папку.
 3. Откройте браузер (Chrome, Яндекс, Edge) и перейдите по адресу: `chrome://extensions/`
 4. В правом верхнем углу включите тумблер **"Режим разработчика"** (Developer mode).
